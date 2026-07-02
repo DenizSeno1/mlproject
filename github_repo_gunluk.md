@@ -87,3 +87,72 @@ Bu aşamada yazılan kodlarda Krish Naik'in eğitim videosunda da yer alan iki k
    ```
 
 ---
+
+## 🚀 Aşama 2 -> 3: Laboratuvar Aşaması - Keşifçi Veri Analizi (EDA) ve Temel Model Denemeleri
+
+**Tarih:** 01 Temmuz 2026  
+**Odak Noktası:** Jupyter Notebook üzerinde veri setini tanıma, görselleştirme (EDA) ve algoritmaları test etme (Prototipleme / Mutfak Süreci).
+
+### 1. Yapılan İşlemler ve Mühendislik Mantığı
+
+#### 📓 Neden Python Dosyalarından (`.py`) Tekrar Jupyter Notebook'a (`.ipynb`) Geçildi?
+- **İşlem:** Projeye `notebook/` klasörü eklendi; veri seti (`data/stud.csv`) konuldu ve `1 . EDA STUDENT PERFORMANCE .ipynb` ile `2. MODEL TRAINING.ipynb` dosyaları oluşturuldu.
+- **Neden Yapıldı? (Laboratuvar vs. Üretim Ayrımı):**
+  Kurumsal makine öğrenmesi süreçleri iki net evreden oluşur:
+  1. **Laboratuvar / Mutfak Evresi (`.ipynb`):** Veri seti ilk kez elimize ulaştığında doğrudan `src/components/` altındaki üretim kodlarını yazamayız. Önce veride kayıp değer (missing value) var mı, aykırı değerler neler, hedef değişken (Target Variable) nasıl dağılmış ve hangi özellikler (features) birbiriyle korele görmek gerekir. Grafikler çizmek, anlık hipotezler denemek ve ilk model kıyaslamalarını (Baseline Model Training) yapmak için Jupyter Notebook en hızlı geri bildirimi veren ortamdır.
+  2. **Üretim / Production Evresi (`.py`):** Notebook üzerinde tüm formüller ve modeller test edilip başarıya ulaştıktan sonra bu kodlar notebook'ta **bırakılmaz**. Modüler hale getirilip `src/components/` altındaki `.py` dosyalarına taşınır.
+
+#### 📦 Bağımlılıkların Güncellenmesi (`requirements.txt`)
+- **İşlem:** Görselleştirme ve makine öğrenmesi algoritmaları için `matplotlib`, `scikit-learn`, `catboost`, `xgboost`, `Flask` paketleri eklendi.
+- **Neden Yapıldı?** EDA aşamasında veri dağılımlarını görmek için `matplotlib/seaborn`, temel modelleri kurup denemek için ise `scikit-learn` ve ağaç tabanlı (boosting) algoritmalar (`catboost`, `xgboost`) gerekir.
+
+---
+
+### 💡 Kıdemli Mühendis Tavsiyesi / Kas Hafızası Kuralı
+- Eğitmenden kodu ve veri setini GitHub'dan çekmek projeye dosyaları hızlıca getirmek için harika bir adımdır. Ancak gerçek öğrenme ve **klavye/kas hafızası** bu hücreleri sadece "Shift+Enter" ile çalıştırmakla gelişmez.
+- **Yarınki Tekrar Stratejisi:** Kendi boş bir notebook dosyanı (`benim_eda_denemem.ipynb` gibi) açıp Pandas fonksiyonlarını (`pd.read_csv()`, `.isnull().sum()`, `.describe()`, `sns.histplot()`, `train_test_split()`) bizzat bakarak kendi parmaklarınla yazmalısın. Bir veriyi ön işlerken neden o adımı attığını hücrelerin tepesine Markdown notları düşerek pekiştirmek seni gerçek bir kıdemli mühendis yapar.
+
+---
+
+## 🚀 Aşama 3 -> 4: Veri Yutma Bileşeni (`DataIngestion` Component & Artifact Mimarisi)
+
+**Tarih:** 02 Temmuz 2026  
+**Odak Noktası:** Notebook (`.ipynb`) ortamında test edilen veri okuma ve ayırma işlemlerinin üretim standartlarında çalışan modüler bir Python bileşenine (`data_ingestion.py`) taşınması.
+
+### 1. Yapılan İşlemler ve Mühendislik Mantığı
+
+#### ⚙️ Yapılandırma Yönetimi İçin `@dataclass` Kullanımı (`DataIngestionConfig`)
+- **İşlem:** Verilerin nereye kaydedileceğini belirten `DataIngestionConfig` sınıfı `@dataclass` dekoratörü ile tanımlandı.
+- **Neden Yapıldı?** Veri yutma modülü çalışırken ham verinin (`data.csv`), eğitim setinin (`train.csv`) ve test setinin (`test.csv`) hangi klasöre çıkacağını bilmelidir. Python'da sabit ayarları ve yolları tutmak için standart `__init__` yazmak yerine `@dataclass` kullanmak endüstri standardı ve en temiz (Clean Code) yaklaşımdır.
+
+#### 🏗️ `artifacts/` Klasörü ve Veri Akışı
+- **İşlem:** Ham veri (`stud.csv`) okundu, `os.makedirs` ile `artifacts/` klasörü açıldı ve veriler %80 Eğitim (`train.csv`) - %20 Test (`test.csv`) olarak ayrılarak bu klasöre kaydedildi.
+- **Neden Yapıldı? (Modüler Pipeline Temeli):** Üretim ortamında bir sonraki bileşen olan `DataTransformation` (Veri Dönüştürme), ham veriye sıfırdan gitmek yerine doğrudan `DataIngestion` modülünün ürettiği ve `artifacts/` içine bıraktığı `train.csv` ve `test.csv` dosyalarını okuyarak işe başlayacaktır. Bileşenlerin bu şekilde **girdi-çıktı dosyaları (`artifacts`) üzerinden haberleşmesi**, boru hattının (pipeline) çökmeden parça parça test edilebilmesini sağlar.
+
+#### 🛡️ Hata Yakalama ve İzlenebilirlik
+- **İşlem:** Veri yutma sürecinin her kritik adımı (`logging.info`) ile kayıt altına alındı ve `try-except` bloğu ile sarmalanarak olası çökmeler `CustomException(e, sys)` üzerinden fırlatıldı.
+
+---
+
+### 💡 Kıdemli Mühendis Gözüyle Kod İncelemesi (Code Review & Kritik Bulgular)
+
+Bu aşamada yazılan `src/components/data_ingestion.py` dosyasında bir mühendisin mutlaka fark edip düzeltmesi gereken 3 önemli nokta bulunuyor:
+
+1. **Kritik Yazım Hatası (Typo & AttributeError Riski):**  
+   [data_ingestion.py](file:///c:/Users/deniz/PYTHON/mlproject/src/components/data_ingestion.py#L21) dosyasının 21. ve 47. satırlarında fonksiyon ismi `initiate_data_ingesiton` olarak yazılmış (ingestion yerine **ingesiton**).  
+   *Neden tehlikeli?* Bir sonraki aşamada `train_pipeline.py` bu sınıfı çağırıp doğru kelimelerle `obj.initiate_data_ingestion()` dediği an sistem çökecek ve `AttributeError` fırlatacaktır. Kodunu hemen düzeltmelisin.
+
+2. **PEP 8 Return Formatı:**  
+   [data_ingestion.py](file:///c:/Users/deniz/PYTHON/mlproject/src/components/data_ingestion.py#L37) dosyasında `return(...)` bitişik yazıldığı için fonksiyon çağrısı gibi görünmektedir. Python'da `return` anahtar kelimesinden sonra bir boşluk bırakılmalıdır:
+   ```python
+   return (
+       self.ingestion_config.train_data_path,
+       self.ingestion_config.test_data_path,
+       self.ingestion_config.raw_data_path
+   )
+   ```
+
+3. **Gereksiz Importlar:**  
+   [data_ingestion.py](file:///c:/Users/deniz/PYTHON/mlproject/src/components/data_ingestion.py#L2) dosyasındaki `import random` ve `import numpy as np` kütüphaneleri bu modül içinde hiç kullanılmamaktadır. Temiz kod prensibi gereği silinmelidir.
+
+---
