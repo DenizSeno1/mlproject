@@ -197,3 +197,69 @@ Yazdığın `src/components/data_transformation.py` ve `src/utils.py` dosyaları
    [utils.py](file:///c:/Users/deniz/PYTHON/mlproject/src/utils.py#L6) dosyasının 6. satırında `import dill` eklenmiş fakat nesne kaydetme/yükleme işlemlerinde standart `pickle` kullanılmıştır. Kullanılmayan paketi kaldırmak kodunu sadeleştirir.
 
 ---
+
+## 🚀 Aşama 5 -> 6: Model Eğitimi, Hiperparametre Optimizasyonu ve Seçimi (`ModelTrainer` Component)
+
+**Tarih:** 03 Temmuz 2026  
+**Odak Noktası:** Dönüştürülmüş matrislerin (`train_arr`, `test_arr`) ayrıştırılması, 7 farklı regresyon algoritmasının `GridSearchCV` ile çapraz doğrulamaya (Cross-Validation) tabi tutularak en iyi hiperparametrelerinin bulunması, eşik değeri (Threshold) kontrolü ve kazanan modelin (`model.pkl`) canlı ortam için mühürlenmesi.
+
+### 1. Yapılan İşlemler ve Mühendislik Mantığı (Derinlemesine Analiz)
+
+#### 🧮 Matris Dilimleme (Array Slicing) ve Veri Hazırlığı
+- **İşlem:** `data_transformation.py` modülünden gelen `train_array` ve `test_array` girdileri NumPy dilimleme kuralı ile `X_train`, `y_train`, `X_test`, `y_test` olarak ayrıştırıldı:
+  ```python
+  X_train, y_train = train_array[:, :-1], train_array[:, -1]
+  ```
+- **Mühendislik Mantığı (Neden?):** Bir önceki adımda (`DataTransformation`) bağımsız değişkenler (`input_features`) ile hedef değişken (`math_score`) `np.c_` metodu kullanılarak yan yana tek bir matrise yapıştırılmıştı. En sağdaki sütun (`-1`) hedef değişkenimizdir. Sütun isimlerinden bağımsız olarak saf NumPy indekslemesiyle veriyi ayırmak, bellek transferini hızlandırır ve veri boru hattında sütun kayması riskini engeller.
+
+#### ⚔️ Çoklu Algoritma Arena Savaşı (Model Dictionary)
+- **İşlem:** Tek bir modele bağlı kalmamak adına `Random Forest`, `Decision Tree`, `Gradient Boosting`, `Linear Regression`, `XGBRegressor`, `CatBoostRegressor` ve `AdaBoostRegressor` olmak üzere 7 farklı algoritma bir sözlük (`models`) içine yerleştirildi.
+- **Mühendislik Mantığı (No Free Lunch Teoremi):** Makine öğrenmesinde "Her veri setinde en iyi çalışan tek bir süper algoritma vardır" diye bir kural yoktur (Buna literatürde *No Free Lunch Theorem* - Bedava Öğle Yemeği Yok Teoremi denir). Tablo verilerinde bazen basit bir Doğrusal Regresyon, bazen de derin ağaç tabanlı CatBoost en yüksek performansı verebilir. Bu yüzden profesyonel ardışık düzenlerde tüm adaylar aynı ringe çıkarılır.
+
+#### 🎯 Hiperparametre Optimizasyonu ve Çapraz Doğrulama (`GridSearchCV` & `evaluate_models`)
+- **İşlem:** `src/utils.py` içindeki `evaluate_models` fonksiyonunda her model için tanımlanan aday parametre uzayı (`params`) `GridSearchCV(model, para, cv=3)` ile test edildi.
+- **Mühendislik Mantığı (`GridSearchCV` Arka Planda Ne Yapar?):**
+  1. **Arama Uzayı:** Örneğin `Random Forest` için `n_estimators: [8, 16, 32, 64, 128, 256]` tanımlandığında 6 farklı ağaç sayısı kombinasyonu dener.
+  2. **`cv=3` (3-Fold Cross Validation):** Veri setini 3 parçaya böler. 2 parçayla modeli eğitip 1 parçayla test eder. Bunu 3 kez döndürerek tesadüfi başarıları eler.
+  3. **Yeniden Eğitim (Refit):** En iyi hiperparametre kombinasyonu (`best_params_`) bulunduktan sonra model `model.set_params(**gs.best_params_)` komutuyla güncellenir ve eğitim verisi üzerinde son halini alır.
+  4. **Performans Metriği ($R^2$ Score):** Regresyon problemlerinde modelin bağımlı değişkeni açıklama yüzdesini gösteren $R^2$ (R-squared) başarı metriği üzerinden modeller kıyaslanır.
+
+#### 🛡️ Kalite Kapısı ve Eşik Değeri Kontrolü (Quality Gate & Thresholding)
+- **İşlem:** Arena savaşı sonucunda en yüksek $R^2$ skorunu alan model (`best_model_score`) belirlendi. Eğer skor %60'ın (`0.6`) altındaysa sistem `CustomException("No best model found")` fırlatarak çalışmayı durduracak şekilde programlandı.
+- **Mühendislik Mantığı (Model Governance):** Canlı sisteme kötü bir model koymak, hiç model koymamaktan daha tehlikelidir (Örn: Yanlış kredi skoru veya savunma sanayiinde hatalı menzil tahmini). Eğer hiçbir algoritma %60 başarıyı geçemiyorsa veri setinde yetersizlik veya özellik mühendisliğinde (Feature Engineering) noksanlık var demektir. Bu durumda hatalı modelin `artifacts/model.pkl` olarak üretilmesine izin verilmez, sistem alarm verir.
+
+#### 💾 Kazanan Şampiyonun Mühürlenmesi (`model.pkl`)
+- **İşlem:** Kalite kapısını geçen şampiyon model `save_object` ile `artifacts/model.pkl` olarak diske yazıldı.
+- **Mühendislik Mantığı:** Canlı tahmin servisi (`predict_pipeline.py`) devreye girdiğinde sıfırdan model eğitmez; milisaniyeler içinde sonuç vermek için doğrudan bu mühürlü `model.pkl` dosyasını belleğe yükleyerek çıkarım (inference) yapar.
+
+---
+
+### 💡 Kıdemli Mühendis Gözüyle Kod İncelemesi (Code Review & Clean Code)
+
+Yazdığın `src/components/model_trainer.py` dosyasında bir mühendisin kod kalitesini (Clean Code) yükseltmek için dikkat etmesi gereken 3 bulgu:
+
+1. **Kullanılmayan Ölü Importlar (Unused Imports):**  
+   [model_trainer.py](file:///c:/Users/deniz/PYTHON/mlproject/src/components/model_trainer.py#L6-L7) dosyasının 6. ve 7. satırlarında:
+   ```python
+   from numpy import save
+   from sklearn import preprocessing
+   ```
+   kütüphaneleri import edilmiştir ancak kodun hiçbir yerinde `save()` veya `preprocessing` kullanılmamaktadır. Linter uyarılarını temizlemek ve kodun bellek ayak izini azaltmak için bu satırları silmelisin.
+
+2. **Sabit Sayıların Karar Mekanizmasına Gömülmesi (Magic Number Code Smell):**  
+   [model_trainer.py](file:///c:/Users/deniz/PYTHON/mlproject/src/components/model_trainer.py#L98) dosyasında:
+   ```python
+   if best_model_score < 0.6:
+   ```
+   ifadesi yer almaktadır. İş kurallarındaki eşik değerleri doğrudan kodun ortasına sabit sayı (magic number) olarak yazmak yerine yapılandırma sınıfında (`ModelTrainerConfig`) tanımlanmalıdır:
+   ```python
+   @dataclass
+   class ModelTrainerConfig:
+       trained_model_file_path = os.path.join("artifacts", "model.pkl")
+       expected_accuracy: float = 0.6  # Standart mühendislik yaklaşımı
+   ```
+
+3. **Yorum Satırında Bırakılmış Ölü Kodlar:**  
+   `params` sözlüğü içerisinde `# 'loss': ['squared_error', ...]` gibi çok sayıda yoruma alınmış deneme satırı kalmış. Laboratuvar (`.ipynb`) aşamasında bu denemeler normalken, üretim modülleri (`.py`) depoya pushlanırken ya temizlenmeli ya da neden devredışı bırakıldığına dair teknik açıklama eklenmelidir.
+
+---
