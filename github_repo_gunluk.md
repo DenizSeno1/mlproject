@@ -156,3 +156,44 @@ Bu aşamada yazılan `src/components/data_ingestion.py` dosyasında bir mühendi
    [data_ingestion.py](file:///c:/Users/deniz/PYTHON/mlproject/src/components/data_ingestion.py#L2) dosyasındaki `import random` ve `import numpy as np` kütüphaneleri bu modül içinde hiç kullanılmamaktadır. Temiz kod prensibi gereği silinmelidir.
 
 ---
+
+## 🚀 Aşama 4 -> 5: Veri Dönüştürme (`DataTransformation` Component & Scikit-Learn Pipelines)
+
+**Tarih:** 02 Temmuz 2026  
+**Odak Noktası:** Sayısal ve kategorik sütunların üretim standartlarında ön işlenmesi (Preprocessing), Scikit-Learn `Pipeline` / `ColumnTransformer` mimarisi ve ön işleme nesnesinin (`preprocessor.pkl`) serileştirilerek disk üzerine kaydedilmesi.
+
+### 1. Yapılan İşlemler ve Mühendislik Mantığı
+
+#### 🔀 Sayısal ve Kategorik Boru Hatları (`num_pipeline` & `cat_pipeline`)
+- **İşlem:** Sayısal değişkenler için `SimpleImputer(strategy="median")` + `StandardScaler()`; kategorik değişkenler için `SimpleImputer(strategy="most_frequent")` + `OneHotEncoder()` + `StandardScaler(with_mean=False)` boru hatları yazıldı ve `ColumnTransformer` ile birleştirildi.
+- **Neden Yapıldı?**
+  1. **Median İle Doldurma:** Sayısal verilerde aykırı değerler (outliers) ortalamayı (`mean`) saptırır. Medyan ise aykırı değerlere karşı dayanıklıdır (robust).
+  2. **`with_mean=False` Gerekçesi:** `OneHotEncoder` seyrek matrisler (sparse matrix, bol sıfırlı yapılar) üretir. Eğer `StandardScaler` içinde `with_mean=True` bırakılırsa seyrek matrisin sıfırları ortalama çıkarılarak dolgun matrise dönüşür, RAM'i kilitler ve sistemi çökertebilir.
+
+#### 🛡️ Veri Sızıntısını (Data Leakage) Önleme: `fit_transform` vs `transform`
+- **İşlem:** Eğitim verisine (`train_df`) `preprocessing_obj.fit_transform()` uygulanırken, test verisine (`test_df`) **sadece** `.transform()` uygulandı.
+- **Neden Yapıldı? (En Kritik Mülakat Kuralı):** Eğer test verisine de `fit` edilseydi, medyan veya standart sapma hesaplanırken test verisinin bilgisi de kullanılmış olurdu. Bu duruma **Veri Sızıntısı (Data Leakage)** denir. Model yapay olarak yüksek başarı gösterir ama canlıya (production) çıkıldığında çuvallar!
+
+#### 💾 Ön İşleme Nesnesinin Kaydedilmesi (`utils.save_object` & `pickle`)
+- **İşlem:** Eğitilen `preprocessing_obj` (preprocessor), `src/utils.py` içindeki `save_object` fonksiyonu kullanılarak `artifacts/` klasörüne disk dosyası olarak kaydedildi.
+- **Neden Yapıldı?** Canlı ortamda web sitemize (`Flask` app / `predict_pipeline.py`) bir öğrenci gelip verilerini girdiğinde, o verinin de eğitim aşamasındaki **aynı medyan ve ağırlıklarla** standartlaştırılması şarttır. Bu nesneyi (`preprocessor`) kaydetmek, tahmin boru hattının bel kemiğidir.
+
+---
+
+### 💡 Kıdemli Mühendis Gözüyle Kod İncelemesi (Code Review & Kritik Uyarılar)
+
+Yazdığın `src/components/data_transformation.py` ve `src/utils.py` dosyalarında dikkat etmen gereken 2 kritik mühendislik notu:
+
+1. **Önemli Dosya Adı Yazım Hatası (`proprocessor.pkl` vs `preprocessor.pkl`):**  
+   [data_transformation.py](file:///c:/Users/deniz/PYTHON/mlproject/src/components/data_transformation.py#L19) dosyasının 19. satırına dikkat et:
+   ```python
+   # Mevcut hal:
+   preprocessor_obj_file_path = os.path.join('artifacts',"proprocessor.pkl")
+   ```
+   Dosya adını kelime başındaki 'e' yerine 'o' ile **`proprocessor.pkl`** olarak kaydetmişsin.  
+   *Tehlikesi ne?* İleride `predict_pipeline.py` yazarken standart isme alışıp `preprocessor.pkl` okumaya çalıştığında `FileNotFoundError` alacaksın. Dosya adını `preprocessor.pkl` olarak düzeltmelisin.
+
+2. **Kullanılmayan Kütüphane (`import dill`):**  
+   [utils.py](file:///c:/Users/deniz/PYTHON/mlproject/src/utils.py#L6) dosyasının 6. satırında `import dill` eklenmiş fakat nesne kaydetme/yükleme işlemlerinde standart `pickle` kullanılmıştır. Kullanılmayan paketi kaldırmak kodunu sadeleştirir.
+
+---
