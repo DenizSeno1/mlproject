@@ -263,3 +263,52 @@ Yazdığın `src/components/model_trainer.py` dosyasında bir mühendisin kod ka
    `params` sözlüğü içerisinde `# 'loss': ['squared_error', ...]` gibi çok sayıda yoruma alınmış deneme satırı kalmış. Laboratuvar (`.ipynb`) aşamasında bu denemeler normalken, üretim modülleri (`.py`) depoya pushlanırken ya temizlenmeli ya da neden devredışı bırakıldığına dair teknik açıklama eklenmelidir.
 
 ---
+
+## 🚀 Aşama 6 -> 7: Tahmin Boru Hattı (`PredictPipeline`) ve Flask Web Servisi (`app.py`)
+
+**Tarih:** 03 Temmuz 2026  
+**Odak Noktası:** Kullanıcı arayüzünden (`HTML`) gelen ham girdilerin Pandas DataFrame modeline dönüştürülmesi (`CustomData`), ön işleme (`preprocessor.pkl`) ve model (`model.pkl`) nesnelerinin uçtan uca çıkarım (inference) için bağlanması ve Flask tabanlı web servisinin entegrasyonu.
+
+### 1. Yapılan İşlemler ve Mühendislik Mantığı (Derinlemesine Analiz)
+
+#### 🌐 Ham Web Verisinin Yapılandırılması (`CustomData` Sınıfı)
+- **İşlem:** Kullanıcının web formundan (`home.html`) girdiği cinsiyet, etnik köken, öğle yemeği tipi, okuma/yazma notları gibi ham verileri kapsülleyen `CustomData` sınıfı ve bu verileri 1 satırlık bir tabloya çeviren `get_data_as_data_frame()` metodu yazıldı.
+- **Mühendislik Mantığı (Neden DataFrame'e Çevriliyor?):** Web formundan gelen veriler kelime (string) veya sayı (float) halindeki gevşek değişkenlerdir. Ancak bizim 4. aşamada eğittiğimiz `ColumnTransformer` (`preprocessor.pkl`) ve 5. aşamada eğittiğimiz makine öğrenmesi modeli (`model.pkl`), kesin sütun isimlerine (`gender`, `race_ethnicity` vb.) ve veri tiplerine sahip 2 boyutlu tabular yapılar (Pandas DataFrame) bekler. `CustomData` sınıfı, dış dünyadan gelen düzensiz web verisini modelin şemasına uyduran bir **Adaptör (Adapter Pattern)** görevi görür.
+
+#### 🔮 Uçtan Uca Çıkarım Motoru (`PredictPipeline`)
+- **İşlem:** `PredictPipeline` sınıfı içindeki `predict(features)` metodu ile önce `preprocessor.pkl` ve `model.pkl` diskten yüklendi. Veri önce `preprocessor.transform(features)` ile ölçeklendirildi, ardından `model.predict(data_scaled)` ile son matematik notu tahmini yapıldı.
+- **Mühendislik Mantığı (Sıralı İşlem Bağımlılığı):** Canlı sistemde kullanıcı "Kız, Grup B, Yüksek Lisans ebeveyni, 72 Okuma Notu" girdiğinde bu metinleri model doğrudan anlayamaz. Verinin **tam olarak eğitimdeki medyanlar ve One-Hot encoding kurallarıyla** dönüştürülmesi şarttır. Bu yüzden önce `transform()`, sonra `predict()` çağrılır. (Not: Burada `fit_transform()` değil sadece `transform()` kullanılmasının sebebi yine veri sızıntısını ve şema bozulmasını önlemektir).
+
+#### 🌍 Sunucu ve Rota Yönetimi (`app.py` & Flask Routing)
+- **İşlem:** Flask mikro web framework'ü kullanılarak iki ana rota (`/` ve `/predictdata`) tanımlandı. `GET` isteği form sayfasını (`home.html`) ekrana basarken, `POST` isteği formdaki verileri toplayıp boru hattını tetikledi ve sonucu ekrana (`results`) yansıttı.
+- **Mühendislik Mantığı:** Makine öğrenmesi modelleri kapalı kutu (black box) scriptler olarak kalamaz. Kullanıcıların veya başka yazılımların modele erişebilmesi için HTTP protokolü üzerinden hizmet veren bir API veya web arayüzü ile sarmalanması (serving) gerekir.
+
+---
+
+### 💡 Kıdemli Mühendis Gözüyle Kod İncelemesi (Code Review & Kritik Bulgular)
+
+Yazdığın `app.py`, `src/pipeline/predict_pipeline.py` ve `templates/home.html` dosyalarını incelediğimde, projenin kaderini etkileyecek **3 çok kritik bulgu** yakaladım:
+
+1. **Kritik Mantık Hatası: Çapraz Çekilen Okuma ve Yazma Notları (Input Swapping Bug):**  
+   [app.py](file:///c:/Users/deniz/PYTHON/mlproject/app.py#L29-L30) dosyasının 29. ve 30. satırlarına çok dikkatli bak:
+   ```python
+   reading_score=float(request.form.get('writing_score')),
+   writing_score=float(request.form.get('reading_score'))
+   ```
+   *Ne oluyor?* `reading_score` değişkenine HTML formundaki `writing_score` değerini; `writing_score` değişkenine ise `reading_score` değerini atıyorsun! Ayrıca [home.html](file:///c:/Users/deniz/PYTHON/mlproject/templates/home.html#L94-L101) dosyasında da etiket (`label`) ile `name` nitelikleri ters yazılmış.  
+   *Tehlikesi ne?* Kullanıcı ekrandan "Okuma: 90, Yazma: 40" girdiğinde, model bunu "Okuma: 40, Yazma: 90" olarak algılayıp tamamen yanlış bir Matematik notu tahmin edecektir. Veri akışındaki isimler tutarlı hale getirilmelidir.
+
+2. **Ciddi Performans Darboğazı: Her İsteğe Özel Disk Okuma (Disk I/O Anti-Pattern):**  
+   [predict_pipeline.py](file:///c:/Users/deniz/PYTHON/mlproject/src/pipeline/predict_pipeline.py#L13-L18) dosyasında model ve ön işleyici `predict()` fonksiyonunun **içinde** yükleniyor:
+   ```python
+   def predict(self, features):
+       model = load_object(file_path=model_path)
+       preprocessor = load_object(file_path=preprocessor_path)
+   ```
+   *Neden anti-pattern?* Diskten dosya okuma (`I/O operation`), RAM'den veri okumaya kıyasla binlerce kat daha yavaştır. Web sitene saniyede 1000 kullanıcı girse, sistem saniyede 1000 kez diskten devasa pickle dosyası okumaya çalışır ve sunucu çöker (High Latency / Bottleneck).  
+   *Doğru Mimari:* Modeller `PredictPipeline.__init__()` içinde (yani nesne ilk oluşturulduğunda bir kez) belleğe (RAM) yüklenmeli, `predict()` metodu sadece RAM'deki hazır modeli kullanmalıdır.
+
+3. **Üretim Ortamı İçin Hata ve Log Temizliği (Debug Print Statements):**  
+   `app.py` ve `predict_pipeline.py` içinde `print("Before Prediction")`, `print("After Loading")` gibi test amaçlı `print` komutları bırakılmış. Production kodlarında terminale `print` basmak yerine kurduğumuz merkezi `logging.info(...)` altyapısı kullanılmalı veya bu satırlar silinmelidir.
+
+---
